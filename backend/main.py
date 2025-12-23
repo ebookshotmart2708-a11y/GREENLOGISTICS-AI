@@ -1,6 +1,7 @@
 """
 GREENLOGISTICS AI - Backend API
 API principal para análisis de documentos logísticos usando Claude AI.
+Versión corregida para Anthropic 0.11.1
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -14,6 +15,7 @@ import PyPDF2
 import asyncio
 from typing import Optional
 import logging
+from datetime import datetime
 
 # ==================== CONFIGURACIÓN INICIAL ====================
 
@@ -28,7 +30,7 @@ load_dotenv()
 app = FastAPI(
     title="GREENLOGISTICS AI API",
     description="API para análisis inteligente de documentos de logística internacional",
-    version="2.0.0",
+    version="2.0.1",
     docs_url="/api/docs",
     redoc_url="/api/redoc"
 )
@@ -46,17 +48,19 @@ app.add_middleware(
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 if not ANTHROPIC_API_KEY:
     logger.warning("ANTHROPIC_API_KEY no encontrada en variables de entorno")
-    # No lanzamos error para permitir modo demo
 
 # Inicializar cliente de Anthropic (Claude) si hay API key
 client = None
 if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui":
     try:
+        # CONFIGURACIÓN CORRECTA para Anthropic 0.11.1
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        logger.info("Cliente Anthropic inicializado correctamente")
+        logger.info("Cliente Anthropic inicializado correctamente (v0.11.1)")
     except Exception as e:
         logger.error(f"Error inicializando Anthropic: {e}")
         client = None
+else:
+    logger.info("Modo demo activado - Sin API key de Anthropic")
 
 # ==================== PROMPT DE GREENLOGISTICS AI ====================
 
@@ -209,6 +213,8 @@ async def process_uploaded_file(file: UploadFile) -> str:
 
 def get_demo_response(document_text: str, language: str) -> dict:
     """Genera una respuesta de demostración cuando no hay API key."""
+    current_time = datetime.now().isoformat()
+    
     return {
         "success": True,
         "analysis": f"""
@@ -218,6 +224,7 @@ def get_demo_response(document_text: str, language: str) -> dict:
 • Documento recibido: {len(document_text)} caracteres
 • Idioma de análisis: {language}
 • Modo: Demostración (API key no configurada)
+• Hora: {current_time}
 
 🔍 COMPRENSIÓN DE LA OPERACIÓN:
 Documento detectado correctamente. Para un análisis real con IA:
@@ -248,7 +255,8 @@ Esta demostración muestra la arquitectura funcional. El siguiente paso es integ
             "chars_processed": len(document_text),
             "language": language,
             "model": "none",
-            "timestamp": "2024-01-01T00:00:00Z"
+            "timestamp": current_time,
+            "version": "2.0.1"
         }
     }
 
@@ -259,12 +267,13 @@ async def root():
     """Endpoint raíz - Información de la API."""
     return {
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "status": "operational",
         "documentation": "/api/docs",
         "health_check": "/api/health",
         "analyze_endpoint": "/api/analyze (POST)",
-        "api_key_configured": ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui"
+        "api_key_configured": ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui",
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/api/health")
@@ -273,9 +282,9 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "ai_available": client is not None,
-        "timestamp": "2024-01-01T00:00:00Z"  # En producción usar datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat()
     }
 
 @app.post("/api/analyze")
@@ -294,6 +303,7 @@ async def analyze_document(
     Devuelve análisis estructurado por GREENLOGISTICS AI.
     """
     start_time = asyncio.get_event_loop().time()
+    current_time = datetime.now().isoformat()
     
     try:
         document_text = ""
@@ -319,7 +329,9 @@ async def analyze_document(
         # 2. Si no hay cliente Anthropic configurado, devolver demo
         if client is None:
             logger.warning("Cliente Anthropic no disponible, usando modo demo")
-            return JSONResponse(get_demo_response(document_text, language))
+            demo_resp = get_demo_response(document_text, language)
+            demo_resp["metadata"]["processing_time_seconds"] = round(asyncio.get_event_loop().time() - start_time, 2)
+            return JSONResponse(demo_resp)
         
         # 3. Preparar mensaje para Claude
         user_message = f"""IDIOMA DE SALIDA: {language}
@@ -358,7 +370,9 @@ INSTRUCCIÓN: Analiza este documento siguiendo EL FLUJO COMPLETO especificado en
                 "language": language,
                 "processing_time_seconds": round(processing_time, 2),
                 "document_chars": len(document_text),
-                "api_mode": "production"
+                "api_mode": "production",
+                "timestamp": current_time,
+                "version": "2.0.1"
             }
         }
         
@@ -396,6 +410,7 @@ if __name__ == "__main__":
     📚 Documentación: http://{host}:{port}/api/docs
     🩺 Health Check: http://{host}:{port}/api/health
     🔑 API Key configurada: {ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui"}
+    🐍 Anthropic versión: {anthropic.__version__ if 'anthropic' in globals() else 'no disponible'}
     """)
     
     uvicorn.run(app, host=host, port=port)
