@@ -1,7 +1,7 @@
 """
 GREENLOGISTICS AI - Backend API
 API principal para análisis de documentos logísticos usando Claude AI.
-Versión corregida para Anthropic 0.11.1
+Versión corregida para Anthropic 0.25.9
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -30,7 +30,7 @@ load_dotenv()
 app = FastAPI(
     title="GREENLOGISTICS AI API",
     description="API para análisis inteligente de documentos de logística internacional",
-    version="2.0.1",
+    version="2.0.2",
     docs_url="/api/docs",
     redoc_url="/api/redoc"
 )
@@ -53,9 +53,10 @@ if not ANTHROPIC_API_KEY:
 client = None
 if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui":
     try:
-        # CONFIGURACIÓN CORRECTA para Anthropic 0.11.1
+        # CONFIGURACIÓN CORRECTA para Anthropic 0.25.9
+        # Versión 0.25.9 usa este formato simple
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        logger.info("Cliente Anthropic inicializado correctamente (v0.11.1)")
+        logger.info(f"Cliente Anthropic inicializado correctamente (v{anthropic.__version__})")
     except Exception as e:
         logger.error(f"Error inicializando Anthropic: {e}")
         client = None
@@ -225,6 +226,7 @@ def get_demo_response(document_text: str, language: str) -> dict:
 • Idioma de análisis: {language}
 • Modo: Demostración (API key no configurada)
 • Hora: {current_time}
+• Versión API: 2.0.2
 
 🔍 COMPRENSIÓN DE LA OPERACIÓN:
 Documento detectado correctamente. Para un análisis real con IA:
@@ -256,7 +258,8 @@ Esta demostración muestra la arquitectura funcional. El siguiente paso es integ
             "language": language,
             "model": "none",
             "timestamp": current_time,
-            "version": "2.0.1"
+            "version": "2.0.2",
+            "anthropic_version": "0.25.9"
         }
     }
 
@@ -267,12 +270,13 @@ async def root():
     """Endpoint raíz - Información de la API."""
     return {
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "status": "operational",
         "documentation": "/api/docs",
         "health_check": "/api/health",
         "analyze_endpoint": "/api/analyze (POST)",
         "api_key_configured": ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui",
+        "anthropic_version": anthropic.__version__ if 'anthropic' in globals() else 'no disponible',
         "timestamp": datetime.now().isoformat()
     }
 
@@ -282,8 +286,9 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.1",
+        "version": "2.0.2",
         "ai_available": client is not None,
+        "anthropic_version": anthropic.__version__ if 'anthropic' in globals() else 'no disponible',
         "timestamp": datetime.now().isoformat()
     }
 
@@ -344,18 +349,27 @@ INSTRUCCIÓN: Analiza este documento siguiendo EL FLUJO COMPLETO especificado en
         
         # 4. Llamar a Claude API
         logger.info("Enviando solicitud a Claude API...")
-        response = client.messages.create(
-            model="claude-3-haiku-20240307",  # Modelo económico y rápido
-            max_tokens=4000,
-            temperature=0.1,  # Baja temperatura para respuestas consistentes
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ]
-        )
+        try:
+            response = client.messages.create(
+                model="claude-3-haiku-20240307",  # Modelo económico y rápido
+                max_tokens=4000,
+                temperature=0.1,  # Baja temperatura para respuestas consistentes
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": user_message
+                    }
+                ]
+            )
+        except Exception as e:
+            logger.error(f"Error llamando a Claude API: {e}")
+            # Si falla la API, devolver demo mejorada
+            demo_resp = get_demo_response(document_text, language)
+            demo_resp["analysis"] = f"⚠️ Error temporal con Claude API: {str(e)}\n\n" + demo_resp["analysis"]
+            demo_resp["metadata"]["processing_time_seconds"] = round(asyncio.get_event_loop().time() - start_time, 2)
+            demo_resp["metadata"]["api_error"] = str(e)
+            return JSONResponse(demo_resp)
         
         # 5. Calcular tiempo de procesamiento
         processing_time = asyncio.get_event_loop().time() - start_time
@@ -372,19 +386,14 @@ INSTRUCCIÓN: Analiza este documento siguiendo EL FLUJO COMPLETO especificado en
                 "document_chars": len(document_text),
                 "api_mode": "production",
                 "timestamp": current_time,
-                "version": "2.0.1"
+                "version": "2.0.2",
+                "anthropic_version": anthropic.__version__
             }
         }
         
         logger.info(f"Análisis completado en {processing_time:.2f}s, tokens: {response.usage.input_tokens}")
         return JSONResponse(result)
         
-    except anthropic.APIError as e:
-        logger.error(f"Error de API de Anthropic: {e}")
-        raise HTTPException(
-            status_code=502, 
-            detail=f"Error en el servicio de IA: {str(e)}"
-        )
     except HTTPException:
         # Re-lanzar excepciones HTTP que ya manejamos
         raise
@@ -411,6 +420,7 @@ if __name__ == "__main__":
     🩺 Health Check: http://{host}:{port}/api/health
     🔑 API Key configurada: {ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui"}
     🐍 Anthropic versión: {anthropic.__version__ if 'anthropic' in globals() else 'no disponible'}
+    📦 Versión API: 2.0.2
     """)
     
     uvicorn.run(app, host=host, port=port)
