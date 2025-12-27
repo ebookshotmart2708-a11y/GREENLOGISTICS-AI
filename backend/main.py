@@ -1,7 +1,7 @@
 """
 GREENLOGISTICS AI - Backend API
-API principal para análisis de documentos logísticos usando Claude AI.
-Versión corregida para Anthropic 0.25.9
+API para análisis de documentos logísticos usando Claude AI.
+Versión simplificada y corregida - SIN errores de 'proxies'
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -17,194 +17,91 @@ from typing import Optional
 import logging
 from datetime import datetime
 
-# ==================== CONFIGURACIÓN INICIAL ====================
+# ==================== CONFIGURACIÓN ====================
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Cargar variables de entorno
 load_dotenv()
 
-# Inicializar aplicación FastAPI
 app = FastAPI(
     title="GREENLOGISTICS AI API",
     description="API para análisis inteligente de documentos de logística internacional",
-    version="2.0.2",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    version="3.0.0"
 )
 
-# Configurar CORS (permite comunicación desde tu frontend)
+# Permitir conexiones desde tu frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción: ["https://tudominio.vercel.app"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Verificar API key de Anthropic
+# Configurar API key
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
-    logger.warning("ANTHROPIC_API_KEY no encontrada en variables de entorno")
 
-# Inicializar cliente de Anthropic (Claude) si hay API key
+# Inicializar cliente Anthropic CORRECTAMENTE (sin 'proxies')
 client = None
 if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui":
     try:
-        # CONFIGURACIÓN CORRECTA para Anthropic 0.25.9
-        # Versión 0.25.9 usa este formato simple
+        # ✅ FORMA CORRECTA - Solo la API key
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        logger.info(f"Cliente Anthropic inicializado correctamente (v{anthropic.__version__})")
+        logger.info("Cliente Anthropic inicializado correctamente")
     except Exception as e:
         logger.error(f"Error inicializando Anthropic: {e}")
         client = None
 else:
-    logger.info("Modo demo activado - Sin API key de Anthropic")
+    logger.info("Modo demo activado")
 
-# ==================== PROMPT DE GREENLOGISTICS AI ====================
+# ==================== PROMPT DE IA ====================
 
-SYSTEM_PROMPT = """Eres GREENLOGISTICS AI, un asesor digital senior especializado en logística internacional, aduanas, fiscalidad y operaciones comerciales sostenibles alineadas con la UE.
+SYSTEM_PROMPT = """Eres GREENLOGISTICS AI, un asesor digital senior especializado en logística internacional.
 
-════════════════════════════════════
-LENGUAJE DE SALIDA (OBLIGATORIO)
-════════════════════════════════════
-- El usuario especificará el idioma (ES, EN, FR, DE).
-- Responde ESTRICTAMENTE en ese idioma.
+REGLAS:
+1. Responde en el idioma especificado (ES, EN, FR, DE)
+2. Solo usa información del documento proporcionado
+3. No inventes datos
+4. Si algo no está especificado, dilo claramente
 
-════════════════════════════════════
-REGLA DE PRIMACÍA DOCUMENTAL (ABSOLUTA)
-════════════════════════════════════
-- El texto proporcionado es la ÚNICA fuente de verdad.
-- NO uses información de conversaciones anteriores.
-- NO inventes ubicaciones, productos o escenarios.
-- Si algo no está en el documento: "[Elemento] no especificado".
+ANÁLISIS OBLIGATORIO:
+1. Comprensión de la operación
+2. Diagnóstico de riesgos (logísticos, aduaneros, fiscales, ambientales)
+3. Recomendaciones estratégicas
+4. Plan de acción
 
-════════════════════════════════════
-VALIDACIÓN PREVIA AL ANÁLISIS
-════════════════════════════════════
-ANTES de analizar, DECLARA:
+Sé conciso y profesional. Tu valor está en insights accionables."""
 
-[CONTEXTO DOCUMENTAL]
-1. PRODUCTO: [Ej: "Manzanas frescas - PERECEDERO/AGRÍCOLA"]
-2. ORIGEN: [Ciudad, País] o "NO ESPECIFICADO"
-3. DESTINO: [Ciudad, País] o "NO ESPECIFICADO"
-4. OPERACIÓN: [Intra-UE / Importación Extra-UE / Exportación Extra-UE / Desconocida]
-5. DATOS FALTANTES: [Listar: Incoterm, transporte, valor, peso, etc.]
-
-════════════════════════════════════
-FLUJO DE ANÁLISIS (OBLIGATORIO)
-════════════════════════════════════
-SIGUE ESTA SECUENCIA EXACTA:
-
-1. COMPRENSIÓN DE LA OPERACIÓN
-   - Resumen ejecutivo
-   - Partes involucradas
-   - Complejidad (Baja/Media/Alta)
-
-2. DIAGNÓSTICO DE RIESGOS
-   - Logísticos (tiempos, manipulación)
-   - Aduaneros/Regulatorios (documentación, certificados)
-   - Fiscales (IVA, aranceles)
-   - Ambientales (CO2, packaging)
-
-3. EVALUACIÓN DE ESCENARIOS
-   - Escenario Base (según datos)
-   - Escenario Optimizado (recomendaciones)
-   - Comparativa cuando sea posible estimar
-
-4. RECOMENDACIÓN ESTRATÉGICA
-   - Mejor opción operativa
-   - Justificación riesgo/costo/sostenibilidad
-
-5. PLAN DE ACCIÓN
-   - Inmediato (48h)
-   - Preparatorio (1-2 semanas)
-   - Estratégico (1-3 meses)
-
-════════════════════════════════════
-INSIGHT DEL ASESOR (POR SECCIÓN)
-════════════════════════════════════
-- Máximo 3 frases por sección
-- Tono profesional y directo
-- Enfocado en lo que más importa para la decisión
-
-════════════════════════════════════
-REGISTRO DE DECISIÓN
-════════════════════════════════════
-Resumir en 4 puntos:
-- Escenario elegido y por qué
-- Riesgos aceptados
-- Acciones diferidas
-- Siguiente revisión recomendada
-
-════════════════════════════════════
-PROHIBICIONES EXPLÍCITAS
-════════════════════════════════════
-- NO asumas Incoterms no especificados
-- NO asumas modos de transporte no especificados
-- Para cálculos estimados, DECLARA la fórmula y supuestos
-- Esto es soporte para decisiones, NO ejecución
-"""
-
-# ==================== FUNCIONES AUXILIARES ====================
+# ==================== FUNCIONES ====================
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extrae texto de un archivo PDF."""
+    """Extrae texto de PDF."""
     text = ""
     try:
         with open(file_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
             for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        logger.info(f"PDF procesado: {len(text)} caracteres extraídos")
+                text += page.extract_text() + "\n"
+        return text.strip()
     except Exception as e:
-        logger.error(f"Error extrayendo texto de PDF: {e}")
-        raise HTTPException(status_code=400, detail=f"Error leyendo PDF: {str(e)}")
-    return text.strip()
-
-def extract_text_from_txt(file_path: str) -> str:
-    """Extrae texto de un archivo TXT."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            text = file.read()
-        logger.info(f"TXT procesado: {len(text)} caracteres")
-        return text
-    except Exception as e:
-        logger.error(f"Error leyendo TXT: {e}")
-        raise HTTPException(status_code=400, detail=f"Error leyendo archivo de texto: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error PDF: {str(e)}")
 
 async def process_uploaded_file(file: UploadFile) -> str:
-    """Procesa un archivo subido y extrae su texto."""
+    """Procesa archivo subido."""
     document_text = ""
     
-    # Crear archivo temporal
     with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
     
     try:
-        # Extraer texto según tipo de archivo
-        filename_lower = file.filename.lower()
-        
-        if filename_lower.endswith('.pdf'):
+        if file.filename.lower().endswith('.pdf'):
             document_text = extract_text_from_pdf(tmp_path)
-        elif filename_lower.endswith(('.txt', '.doc', '.docx')):
-            document_text = extract_text_from_txt(tmp_path)
         else:
-            # Intentar leer como texto plano
             document_text = content.decode('utf-8', errors='ignore')
-            logger.info(f"Archivo genérico procesado: {len(document_text)} caracteres")
-        
-        if not document_text.strip():
-            raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto")
-            
     finally:
-        # Limpiar archivo temporal
         try:
             os.unlink(tmp_path)
         except:
@@ -212,84 +109,29 @@ async def process_uploaded_file(file: UploadFile) -> str:
     
     return document_text
 
-def get_demo_response(document_text: str, language: str) -> dict:
-    """Genera una respuesta de demostración cuando no hay API key."""
-    current_time = datetime.now().isoformat()
-    
-    return {
-        "success": True,
-        "analysis": f"""
-🌍 GREENLOGISTICS AI - ANÁLISIS DE DEMOSTRACIÓN
-
-📋 CONTEXTO DOCUMENTAL (MODO DEMO):
-• Documento recibido: {len(document_text)} caracteres
-• Idioma de análisis: {language}
-• Modo: Demostración (API key no configurada)
-• Hora: {current_time}
-• Versión API: 2.0.2
-
-🔍 COMPRENSIÓN DE LA OPERACIÓN:
-Documento detectado correctamente. Para un análisis real con IA:
-1. Configura ANTHROPIC_API_KEY en Render.com
-2. Recarga la aplicación
-3. Sube un documento real de logística
-
-💡 INSIGHT DEL ASESOR:
-Esta demostración muestra la arquitectura funcional. El siguiente paso es integrar Claude AI para análisis de:
-• Clasificación arancelaria automática
-• Optimización de Incoterms
-• Evaluación de riesgos aduaneros
-• Cálculo de huella de carbono
-
-✅ PLAN DE ACCIÓN:
-1. INMEDIATO: Configurar API key en variables de entorno
-2. PREPARATORIO: Probar con documentos reales de exportación
-3. ESTRATÉGICO: Conectar con bases de datos de aranceles
-
-📊 REGISTRO DE DECISIÓN:
-• Escenario: Modo demostración activado
-• Justificación: API key pendiente de configuración
-• Riesgo: Análisis limitado a funcionalidad básica
-• Siguiente: Configurar integración completa con Claude AI
-""",
-        "metadata": {
-            "mode": "demo",
-            "chars_processed": len(document_text),
-            "language": language,
-            "model": "none",
-            "timestamp": current_time,
-            "version": "2.0.2",
-            "anthropic_version": "0.25.9"
-        }
-    }
-
-# ==================== ENDPOINTS DE LA API ====================
+# ==================== ENDPOINTS ====================
 
 @app.get("/")
 async def root():
-    """Endpoint raíz - Información de la API."""
     return {
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.2",
+        "version": "3.0.0",
         "status": "operational",
-        "documentation": "/api/docs",
-        "health_check": "/api/health",
-        "analyze_endpoint": "/api/analyze (POST)",
-        "api_key_configured": ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui",
-        "anthropic_version": anthropic.__version__ if 'anthropic' in globals() else 'no disponible',
-        "timestamp": datetime.now().isoformat()
+        "endpoints": {
+            "health": "/api/health",
+            "analyze": "/api/analyze (POST)"
+        }
     }
 
 @app.get("/api/health")
 async def health_check():
-    """Endpoint de verificación de salud."""
+    """Endpoint de salud - MUY IMPORTANTE"""
     return {
         "status": "healthy",
         "service": "GREENLOGISTICS AI API",
-        "version": "2.0.2",
-        "ai_available": client is not None,
-        "anthropic_version": anthropic.__version__ if 'anthropic' in globals() else 'no disponible',
-        "timestamp": datetime.now().isoformat()
+        "version": "3.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "ai_available": client is not None
     }
 
 @app.post("/api/analyze")
@@ -299,128 +141,71 @@ async def analyze_document(
     language: str = Form("ES")
 ):
     """
-    Endpoint principal para analizar documentos logísticos.
-    
-    Acepta:
-    - Archivo (PDF/TXT/DOC) o 
-    - Texto directo
-    
-    Devuelve análisis estructurado por GREENLOGISTICS AI.
+    Analiza documentos logísticos.
     """
-    start_time = asyncio.get_event_loop().time()
-    current_time = datetime.now().isoformat()
-    
     try:
+        # 1. Obtener texto
         document_text = ""
-        
-        # 1. Obtener texto del documento
         if file:
-            logger.info(f"Procesando archivo: {file.filename}, tipo: {file.content_type}")
             document_text = await process_uploaded_file(file)
         elif text:
-            logger.info(f"Procesando texto directo: {len(text)} caracteres")
             document_text = text.strip()
         else:
-            raise HTTPException(
-                status_code=400, 
-                detail="Debe proporcionar un archivo (file) o texto (text)"
-            )
+            raise HTTPException(status_code=400, detail="Proporcione archivo o texto")
         
         if not document_text:
-            raise HTTPException(status_code=400, detail="El documento está vacío")
+            raise HTTPException(status_code=400, detail="Documento vacío")
         
-        logger.info(f"Documento listo para análisis: {len(document_text)} caracteres, idioma: {language}")
+        logger.info(f"Documento: {len(document_text)} chars, idioma: {language}")
         
-        # 2. Si no hay cliente Anthropic configurado, devolver demo
+        # 2. Si no hay API key, devolver demo
         if client is None:
-            logger.warning("Cliente Anthropic no disponible, usando modo demo")
-            demo_resp = get_demo_response(document_text, language)
-            demo_resp["metadata"]["processing_time_seconds"] = round(asyncio.get_event_loop().time() - start_time, 2)
-            return JSONResponse(demo_resp)
-        
-        # 3. Preparar mensaje para Claude
-        user_message = f"""IDIOMA DE SALIDA: {language}
+            return JSONResponse({
+                "success": True,
+                "analysis": f"""
+📊 GREENLOGISTICS AI - DEMO
+Documento analizado: {len(document_text)} caracteres
+Idioma: {language}
 
-DOCUMENTO PARA ANALIZAR:
-{document_text}
+💡 Este es el modo demostración. Para análisis con IA real:
+1. Configure ANTHROPIC_API_KEY en Render.com
+2. La aplicación se actualizará automáticamente
+3. Podrá analizar documentos con Claude AI
 
-INSTRUCCIÓN: Analiza este documento siguiendo EL FLUJO COMPLETO especificado en el SYSTEM PROMPT.
-"""
+🔗 Backend funcionando correctamente en Render.
+                """,
+                "metadata": {"mode": "demo"}
+            })
         
-        # 4. Llamar a Claude API
-        logger.info("Enviando solicitud a Claude API...")
-        try:
-            response = client.messages.create(
-                model="claude-3-haiku-20240307",  # Modelo económico y rápido
-                max_tokens=4000,
-                temperature=0.1,  # Baja temperatura para respuestas consistentes
-                system=SYSTEM_PROMPT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ]
-            )
-        except Exception as e:
-            logger.error(f"Error llamando a Claude API: {e}")
-            # Si falla la API, devolver demo mejorada
-            demo_resp = get_demo_response(document_text, language)
-            demo_resp["analysis"] = f"⚠️ Error temporal con Claude API: {str(e)}\n\n" + demo_resp["analysis"]
-            demo_resp["metadata"]["processing_time_seconds"] = round(asyncio.get_event_loop().time() - start_time, 2)
-            demo_resp["metadata"]["api_error"] = str(e)
-            return JSONResponse(demo_resp)
+        # 3. Llamar a Claude AI
+        response = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=2000,
+            temperature=0.1,
+            system=SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Idioma: {language}\n\nDocumento:\n{document_text}"
+            }]
+        )
         
-        # 5. Calcular tiempo de procesamiento
-        processing_time = asyncio.get_event_loop().time() - start_time
-        
-        # 6. Retornar análisis
-        result = {
+        # 4. Retornar resultado
+        return JSONResponse({
             "success": True,
             "analysis": response.content[0].text,
             "metadata": {
-                "tokens_used": response.usage.input_tokens,
-                "model": "claude-3-haiku-20240307",
+                "model": "claude-3-haiku",
                 "language": language,
-                "processing_time_seconds": round(processing_time, 2),
-                "document_chars": len(document_text),
-                "api_mode": "production",
-                "timestamp": current_time,
-                "version": "2.0.2",
-                "anthropic_version": anthropic.__version__
+                "timestamp": datetime.now().isoformat()
             }
-        }
+        })
         
-        logger.info(f"Análisis completado en {processing_time:.2f}s, tokens: {response.usage.input_tokens}")
-        return JSONResponse(result)
-        
-    except HTTPException:
-        # Re-lanzar excepciones HTTP que ya manejamos
-        raise
     except Exception as e:
-        logger.error(f"Error interno inesperado: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error interno del servidor: {str(e)}"
-        )
+        logger.error(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# ==================== PUNTO DE ENTRADA ====================
+# ==================== INICIAR ====================
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Configuración para desarrollo local
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
-    
-    print(f"""
-    🚀 GREENLOGISTICS AI API Iniciando...
-    🌐 URL: http://{host}:{port}
-    📚 Documentación: http://{host}:{port}/api/docs
-    🩺 Health Check: http://{host}:{port}/api/health
-    🔑 API Key configurada: {ANTHROPIC_API_KEY is not None and ANTHROPIC_API_KEY != "sk-ant-tu_clave_aqui"}
-    🐍 Anthropic versión: {anthropic.__version__ if 'anthropic' in globals() else 'no disponible'}
-    📦 Versión API: 2.0.2
-    """)
-    
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
